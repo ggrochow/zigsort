@@ -6,10 +6,10 @@ select options
 pixel sort in as close to realtime as we can and display
 
 ## steps
-serve html page
-build zig wasm module
-call zig wasm module from js in html page
-add file upload and canvas
+!serve html page
+!build zig wasm module
+!call zig wasm module from js in html page
+!add file upload and canvas
 pass canvas data to zig
 do some stuff with said canvas data
 display via JS
