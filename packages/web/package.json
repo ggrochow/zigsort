@@ -1,11 +1,15 @@
 {
   "name": "web",
-  "module": "index.ts",
   "type": "module",
-  "devDependencies": {
-    "bun-types": "^0.5.0"
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
   },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
+  "dependencies": {
+    "astro": "^4.14.6"
   }
 }
