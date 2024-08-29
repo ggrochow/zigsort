@@ -2,6 +2,31 @@
 import Layout from '../layouts/Layout.astro';
 ---
 
+<script>
+  async function instantiateWasmModule() {
+    const wasmEnv = {
+      env: {
+      },
+    };
+  
+    const mod = await WebAssembly.instantiateStreaming(
+      fetch("pixelsorter.wasm"),
+      wasmEnv,
+    );
+
+    return mod;
+  }
+
+  instantiateWasmModule()
+  .then((mod) => {
+      const result = mod.instance.exports.add(1, 2);
+      console.log("got", result, "from wasm");
+    })
+  .catch((e) => {
+    console.error(e);
+  })
+</script>
+
 <Layout title="Welcome to Astro.">
 	<main>
     <div class="controls">
