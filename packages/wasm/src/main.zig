@@ -40,11 +40,12 @@ export fn count_array() i32 {
     const ptr = globalData.input_img_pointer orelse return 0;
     const len = globalData.input_img_size orelse return 0;
 
-    const slice = ptr[0..len];
+    // I+4 to only set a single color
+    for (0..len) |i| {
+        ptr[i] = 100;
+    }
 
-    print("0-{d} - {any}", .{ slice.len, slice });
-
-    return @intCast(slice[0]);
+    return @intCast(ptr[0]);
 }
 
 fn print(comptime fmt: []const u8, args: anytype) void {

@@ -6,6 +6,7 @@ class WasmHandler {
   constructor() {
     this.memory = null;
     this.mod = null;
+    this.ctx = null;
   }
 
   log_wasm(s, len) {
@@ -35,16 +36,18 @@ async function instantiateWasmModule(wasm_handler) {
   return mod;
 }
 
-  function getImageData() {
+  function getImageData(wasm_handler) {
     const canvasEl = document.getElementById("canvas");
     if (!canvasEl) {
       throw new Error("no canvas");
     }
 
+
     const context = canvasEl.getContext("2d");
     if (!context) {
       throw new Error("failed to get 2d canvas context")
     }
+    wasm_handler.ctx = context;
 
     return context.getImageData(0, 0, canvasEl.height, canvasEl.width);
   }
@@ -54,18 +57,24 @@ async function instantiateWasmModule(wasm_handler) {
 
   instantiateWasmModule(handler)
   .then((mod) => {
-      const imageData = getImageData();
+      const imageData = getImageData(handler);
       const arr = imageData.data;
+      console.log(arr);
 
       const byteLen = arr.byteLength;
-
       const pointer = mod.instance.exports.alloc_input_image(byteLen);
 
-      new Uint8ClampedArray(mod.instance.exports.memory.buffer)
+      new Uint8ClampedArray(handler.memory.buffer)
         .set(arr, pointer);
 
       const res = mod.instance.exports.count_array(pointer, arr.length);
-      
+      console.log("count_array val", res);
+
+      const resBuf = new Uint8ClampedArray(handler.memory.buffer, pointer, byteLen);
+      const newImageData = new ImageData(resBuf, imageData.height, imageData.width);
+      handler.ctx.putImageData(newImageData, 0 , 0);
+      console.log(resBuf);
+
       mod.instance.exports.deallocate_input_image(pointer, byteLen);
     })
   .catch((e) => {
@@ -73,7 +82,7 @@ async function instantiateWasmModule(wasm_handler) {
   })
 </script>
 
-<Layout title="Welcome to Astro.">
+<Layout title="Welcome to PixelSort">
 	<main>
     <div class="controls">
       <input type='file' id='file_input'>
