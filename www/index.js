@@ -54,6 +54,7 @@ class App {
       this.canvasEl.width,
       this.canvasEl.height,
     );
+    console.log(imageData);
     const arr = imageData.data;
     const byteLen = arr.byteLength;
     console.timeEnd("prewasm");
