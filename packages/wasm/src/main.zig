@@ -39,25 +39,13 @@ export fn count_array() i32 {
     // TODO: better optional handling
     const ptr = globalData.input_img_pointer orelse return 0;
     const len = globalData.input_img_size orelse return 0;
-
     // I+4 to only set a single color
     var i: usize = 0;
-    while (true) {
-        defer i += 4;
-        if (i > len) {
-            break;
-        }
-
-        ptr[i + 2] = 255;
-
-        // const r = ptr[i];
-        // const g = ptr[i + 1];
-        // const b = ptr[i + 2];
-        // const a = ptr[i + 3];
-        // print("r {d} g {d} b {d} a {d}", .{ r, g, b, a });
+    while (i + 3 < len) : (i += 4) {
+        ptr[i] = 255;
     }
 
-    return @intCast(ptr[0]);
+    return @intCast(i);
 }
 
 fn print(comptime fmt: []const u8, args: anytype) void {

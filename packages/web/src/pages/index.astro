@@ -80,8 +80,8 @@ async function instantiateWasmModule(wasm_handler) {
   return mod;
 }
 
-  function getImageData(wasm_handler) {
-    return context.getImageData(0, 0, canvasEl.height, canvasEl.width);
+  function getImageData() {
+    return context.getImageData(0, 0, canvasEl.width, canvasEl.height);
   }
 
 
@@ -90,27 +90,27 @@ async function instantiateWasmModule(wasm_handler) {
   function init() {
   instantiateWasmModule(handler)
   .then((mod) => {
-      const imageData = getImageData(handler);
+      console.log("canvasEl H W", canvasEl.height, canvasEl.widgth);
+      const imageData = getImageData();
       const arr = imageData.data;
 
-      const byteLen = arr.byteLength;
-      const pointer = mod.instance.exports.alloc_input_image(byteLen);
+       const byteLen = arr.byteLength;
+       const pointer = mod.instance.exports.alloc_input_image(byteLen);
+ 
+       new Uint8ClampedArray(handler.memory.buffer)
+         .set(arr, pointer);
+ 
+       const res = mod.instance.exports.count_array(pointer, arr.length);
+       console.log("count_array val", res);
+       console.log("arr.byteLength", byteLen, "arr.len", arr.length);
+ 
+       const resBuf = new Uint8ClampedArray(handler.memory.buffer, pointer, byteLen);
+       const newImageData = new ImageData(resBuf, imageData.width, imageData.height);
+ 
+       context.clearRect(0, 0, canvas.width, canvas.height);
+       context.putImageData(newImageData, 0 , 0);
 
-      new Uint8ClampedArray(handler.memory.buffer)
-        .set(arr, pointer);
-
-      const res = mod.instance.exports.count_array(pointer, arr.length);
-      console.log("count_array val", res);
-
-      const resBuf = new Uint8ClampedArray(handler.memory.buffer, pointer, byteLen);
-      const newImageData = new ImageData(resBuf, imageData.width, imageData.height);
-
-
-      console.log(imageData);
-      console.log(newImageData);
-      context.putImageData(newImageData, 0 , 0);
-
-      mod.instance.exports.deallocate_input_image(pointer, byteLen);
+       mod.instance.exports.deallocate_input_image(pointer, byteLen);
     })
   .catch((e) => {
     console.error(e);
