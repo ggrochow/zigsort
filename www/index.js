@@ -1,43 +1,128 @@
-const canvasEl = document.getElementById("canvas");
-if (!canvasEl) {
-  throw new Error("no canvas");
-}
-const context = canvasEl.getContext("2d");
-if (!context) {
-  throw new Error("failed to get 2d canvas context");
-}
-const fileInputEl = document.getElementById("file_input");
-if (!fileInputEl) {
-  throw new Error("failed to get file input");
-}
+class App {
+  // html elements
+  fileInputEl;
+  canvasEl;
+  // canvas context
+  context;
+  // wasm load status
+  ready;
 
-function onFileChange() {
-  const file = fileInputEl.files[0];
+  constructor() {
+    this.canvasEl = document.getElementById("canvas");
+    if (!this.canvasEl) {
+      throw new Error("no canvas");
+    }
 
-  if (file) {
-    processRawImg(file);
+    this.context = this.canvasEl.getContext("2d");
+    if (!this.context) {
+      throw new Error("failed to get 2d canvas context");
+    }
+
+    this.fileInputEl = document.getElementById("file_input");
+    if (!this.fileInputEl) {
+      throw new Error("failed to get file input");
+    }
+
+    this.fileInputEl.addEventListener("change", this.onFileChange);
+    if (this.fileInputEl.files[0]) {
+      this.processRawImg(fileInputEl.files[0]);
+    }
+
+    this.ready = false;
+    this.handler = new WasmHandler();
+    instantiateWasmModule(this.handler)
+      .then(() => {
+        console.log("ready");
+        this.ready = true;
+      })
+      .catch((e) => {
+        console.error(e);
+      });
   }
-}
 
-function processRawImg(file) {
-  const reader = new FileReader();
-  reader.onload = function (event) {
-    const img = new Image();
-    img.onload = function () {
-      canvasEl.width = img.width;
-      canvasEl.height = img.height;
-      console.log("image found", "W", img.width, "H", img.height);
-      context.drawImage(img, 0, 0);
-      // this should start our wasm stuff
-    };
-    img.src = event.target.result;
+  process() {
+    if (!this.ready) {
+      console.log("wasm loading");
+      return;
+    }
+    console.time("process");
+
+    console.time("prewasm");
+    const imageData = this.context.getImageData(
+      0,
+      0,
+      this.canvasEl.width,
+      this.canvasEl.height,
+    );
+    const arr = imageData.data;
+    const byteLen = arr.byteLength;
+    console.timeEnd("prewasm");
+
+    console.time("alloc");
+    const pointer =
+      this.handler.mod.instance.exports.alloc_input_image(byteLen);
+    console.timeEnd("alloc");
+
+    console.time("arr");
+    new Uint8ClampedArray(this.handler.memory.buffer).set(arr, pointer);
+    console.time("arrEnd");
+
+    console.time("wasm");
+    const res = this.handler.mod.instance.exports.process_img(
+      pointer,
+      byteLen,
+      imageData.height,
+      imageData.width,
+    );
+    console.timeEnd("wasm");
+
+    console.log("wasm res", res);
+    console.time("putImg");
+    const resBuf = new Uint8ClampedArray(
+      this.handler.memory.buffer,
+      pointer,
+      byteLen,
+    );
+    const newImageData = new ImageData(
+      resBuf,
+      imageData.width,
+      imageData.height,
+    );
+    this.context.clearRect(0, 0, this.canvasEl.width, this.canvasEl.height);
+    this.context.putImageData(newImageData, 0, 0);
+    console.timeEnd("putImg");
+
+    console.time("dealloc");
+    this.handler.mod.instance.exports.deallocate_input_image(pointer, byteLen);
+    console.timeEnd("dealloc");
+
+    console.timeEnd("process");
+  }
+
+  onFileChange = () => {
+    const file = this.fileInputEl.files[0];
+
+    if (file) {
+      this.processRawImg(file);
+    }
   };
-  reader.readAsDataURL(file);
-}
 
-fileInputEl.addEventListener("change", onFileChange);
-if (fileInputEl.files[0]) {
-  processRawImg(fileInputEl.files[0]);
+  processRawImg = (file) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        this.canvasEl.width = img.width;
+        this.canvasEl.height = img.height;
+        console.log("image found", "W", img.width, "H", img.height);
+        this.context.drawImage(img, 0, 0);
+
+        this.process();
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
 }
 
 class WasmHandler {
@@ -74,48 +159,11 @@ async function instantiateWasmModule(wasm_handler) {
   return mod;
 }
 
-function getImageData() {
-  return context.getImageData(0, 0, canvasEl.width, canvasEl.height);
-}
-
-const handler = new WasmHandler();
-
 function init() {
-  instantiateWasmModule(handler)
-    .then((mod) => {
-      const imageData = getImageData();
-      const arr = imageData.data;
-
-      const byteLen = arr.byteLength;
-      const pointer = mod.instance.exports.alloc_input_image(byteLen);
-
-      new Uint8ClampedArray(handler.memory.buffer).set(arr, pointer);
-
-      const res = mod.instance.exports.count_array(pointer, arr.length);
-      console.log("count_array val", res);
-      console.log("arr.byteLength", byteLen, "arr.len", arr.length);
-
-      const resBuf = new Uint8ClampedArray(
-        handler.memory.buffer,
-        pointer,
-        byteLen,
-      );
-      const newImageData = new ImageData(
-        resBuf,
-        imageData.width,
-        imageData.height,
-      );
-
-      context.clearRect(0, 0, canvasEl.width, canvasEl.height);
-      context.putImageData(newImageData, 0, 0);
-
-      mod.instance.exports.deallocate_input_image(pointer, byteLen);
-    })
-    .catch((e) => {
-      console.error(e);
-    });
+  console.log("loading app");
+  new App();
 }
 
-document.onLoad = init();
+window.onload = init;
 
 console.log("hello from indexjs");

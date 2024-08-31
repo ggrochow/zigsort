@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
-    <script src="/index.js"></script>
+    <script src="/index.js" defer></script>
     <title>PixelSort</title>
     <style>
       html,
@@ -19,9 +19,10 @@
   <body>
     <main>
       <div class="controls">
-        <input type="file" id="file_input" />
+        <input type="file" id="file_input" accept=".jpg,.jpeg"/>
       </div>
       <canvas id="canvas"></canvas>
     </main>
+
   </body>
 </html>
