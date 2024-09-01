@@ -9,14 +9,13 @@ const GlobalData = struct {
 };
 
 var globalData: GlobalData = .{};
-
 // module needs things before anything can happen
 // need to alloc the image
 // need to init with image len/height info
 // need to init with any option
 
 export fn alloc_input_image(size: usize) [*]u8 {
-    const slice = allocator.alloc(u8, size) catch unreachable;
+    const slice = allocator.alloc(u8, size) catch @panic("failed alloc_input_image");
 
     return slice.ptr;
 }
@@ -25,48 +24,111 @@ export fn deallocate_input_image(ptr: [*]u8, size: usize) void {
     allocator.free(ptr[0..size]);
 }
 
+const PixelData = struct {
+    sortValue: u8,
+    r: u8,
+    g: u8,
+    b: u8,
+    idx: usize,
+};
+const PixelGroup = struct { pixels: []PixelData, start_idx: usize };
+
+const brightness_min: u8 = 30;
+const brightmess_max: u8 = 70;
+
 // ptr is pointing a slice of u8s of len size
 // 4 u8s represent 1 pixel, being R G B A in that order.
 export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32) u32 {
-    print("h-{d} w-{d}", .{ img_height, img_width });
+    // first we must find the groups of pixels we will to sort in this row.
+    // we will then sort the groupings by the brightness value of the pixel
+    // and update the image data directly after the grouping is complete
+    const img = ptr[0..size];
 
-    // loop through each row of pixels
+    // holds our pixelData as we work on a row
+    var rowPixels = std.ArrayList(PixelData).init(allocator);
+    defer rowPixels.deinit();
+    rowPixels.ensureTotalCapacity(@intCast(img_width)) catch @panic("rowdata resize failed");
+
+    // holds groupings of pixel data for a given row
+    var rowGrouping = std.ArrayList(PixelGroup).init(allocator);
+    defer rowGrouping.deinit();
+
+    // start working through each row
     var y: usize = 0;
     while (y < img_height) : (y += 1) {
-        // pixels comes in groups of 4 numbers get the correct index
         const row_start_idx = y * img_width * 4;
+        const row = img[row_start_idx .. row_start_idx + (img_width * 4)];
 
-        var x: usize = 0;
-        while (x < img_width) : (x += 1) {
-            const px_start_index = row_start_idx + (x * 4);
-            const r = ptr[px_start_index];
-            const g = ptr[px_start_index + 1];
-            const b = ptr[px_start_index + 2];
+        // walk each pixel and setup our rowData with the data needed to sort/group
+        var row_idx: usize = 0;
+        while (row_idx < row.len) : (row_idx += 4) {
+            const r = row[row_idx];
+            const g = row[row_idx + 1];
+            const b = row[row_idx + 2];
 
-            const lightness = percievedLigthness(r, g, b);
-            const lightness_norm: f64 = 255 * (@as(f64, @floatFromInt(lightness)) / 100.0);
+            const pixelData = .{
+                .sortValue = percievedLigthness(r, g, b),
+                .r = r,
+                .g = g,
+                .b = b,
+                .idx = row_idx, // this seems bad
+            };
 
-            ptr[px_start_index + 3] = @intFromFloat(lightness_norm);
-            // print("light-{d}", .{lightness});
+            rowPixels.append(pixelData) catch @panic("rowdata append failed");
         }
 
-        // print("x-{d}", .{x});
+        // walk our rowData to generate our sub-rows to sort within.
+        // using the sortValue and some threshholds for now to see if we need a new bucket
+        var interval_start: usize = 0;
+        var in_interval: bool = false;
+        for (rowPixels.items, 0..) |item, i| {
+            if (item.sortValue < brightness_min or item.sortValue > brightmess_max) {
+                if (!in_interval) {
+                    in_interval = true;
+                    interval_start = i;
+                }
+            } else {
+                // only append groupings when we are in an interval
+                // no point adding single pixels to sort on
+                if (in_interval) {
+                    in_interval = false;
+                    const grouping: PixelGroup = .{
+                        .pixels = rowPixels.items[interval_start..i],
+                        .start_idx = interval_start, // offset into row not pixelData
+                    };
 
-        // first we must find the groups of pixels we will to sort in this row.
-        // we will then sort the groupings by the brightness value of the pixel
-        // and update the image data directly after the grouping is complete
+                    rowGrouping.append(grouping) catch @panic("rowGrouping append failed");
+                }
+            }
+        }
+
+        // go through each grouping, sorting the slice by sortValue.
+        for (rowGrouping.items) |grouping| {
+            // print("pixel idx {}, grouping idx {}", .{ grouping.pixels[0].idx, grouping.start_idx });
+
+            std.mem.sort(PixelData, grouping.pixels, {}, sortPixelData);
+            // go through sorted slice and apply the stuff
+            // print("grouping len {}", .{grouping.pixels.len});
+            for (grouping.pixels, 0..) |pixel, i| {
+                const group_row_idx = (grouping.start_idx + i) * 4;
+
+                row[group_row_idx] = pixel.r;
+                row[group_row_idx + 1] = pixel.g;
+                row[group_row_idx + 2] = pixel.b;
+            }
+        }
+
+        rowPixels.clearRetainingCapacity();
+        rowGrouping.clearRetainingCapacity();
     }
 
-    // print("y-{d}", .{y});
-    //  var i: usize = 0;
-    //  while (i + 3 < size) : (i += 4) {
-    //      const r = ptr[i];
-    //      const g = ptr[i + 1];
-    //      const b = ptr[i + 2];
-    //  }
-
-    _ = size;
     return y;
+}
+
+// less than sort
+fn sortPixelData(context: void, lhs: PixelData, rhs: PixelData) bool {
+    _ = context;
+    return lhs.sortValue < rhs.sortValue;
 }
 
 fn percievedLigthness(r: u8, g: u8, b: u8) u8 {

@@ -14,12 +14,16 @@
         padding: 0;
         margin: 0;
       }
+      canvas {
+        max-width: 100vw;
+        max-height: 100vh;
+      }
     </style>
   </head>
   <body>
     <main>
       <div class="controls">
-        <input type="file" id="file_input" accept=".jpg,.jpeg"/>
+        <input type="file" id="file_input" accept=".jpg,.jpeg,.webp"/>
       </div>
       <canvas id="canvas"></canvas>
     </main>
