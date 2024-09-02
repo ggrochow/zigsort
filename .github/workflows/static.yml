@@ -36,17 +36,13 @@ jobs:
       - name: Setup Zig
         uses: goto-bus-stop/setup-zig@v2
       - name: Build zig
-        run: |
-          cd wasm
-          zig build -Doptimize=ReleaseFast
+        run: zig build -Doptimize=ReleaseFast --build-file ./wasm/build.zig
       - name: Move .wasm
-        run: |
-          mv ./zig_out/pixelsorter.wasm ../www/
+        run: mv .wasm/zig_out/pixelsorter.wasm ./www/
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: '.'
+          path: './www'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
