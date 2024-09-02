@@ -1,11 +1,20 @@
+// TODO: move slow wasm blocking fns to webworker somehow
+// this is in progress GL
 class App {
   // html elements
   fileInputEl;
   canvasEl;
+  minThreshInputEl;
+  maxThreshInputEl;
   // canvas context
   context;
-  // wasm load status
-  ready;
+  // worker + wasm loaded
+  ready = false;
+  // is currently in processing
+  processing = false;
+  // if we tried to que a process while currently processing
+  // use to send another call to process when complete so we dont multi-q
+  needsProcessing = false;
 
   constructor() {
     this.canvasEl = document.getElementById("canvas");
@@ -25,79 +34,94 @@ class App {
 
     this.fileInputEl.addEventListener("change", this.onFileChange);
     if (this.fileInputEl.files[0]) {
-      this.processRawImg(fileInputEl.files[0]);
+      this.processRawImg(this.fileInputEl.files[0]);
     }
 
-    this.ready = false;
-    this.handler = new WasmHandler();
-    instantiateWasmModule(this.handler)
-      .then(() => {
-        console.log("ready");
+    this.minThreshInputEl = document.getElementById("min_thresh");
+    if (!this.minThreshInputEl) {
+      throw new Error("failed to get min input");
+    }
+
+    this.maxThreshInputEl = document.getElementById("max_thresh");
+    if (!this.maxThreshInputEl) {
+      throw new Error("failed to get max input");
+    }
+
+    this.processBtnEl = document.getElementById("process");
+    if (!this.maxThreshInputEl) {
+      throw new Error("failed to get max input");
+    }
+
+    this.processBtnEl.onclick = () => {
+      this.process();
+    };
+
+    this.worker = new Worker("./worker.js");
+    this.worker.onmessage = this.handleWorkerMessage.bind(this);
+    this.worker.onerror = (e) => {
+      console.error("worker error", e);
+    };
+    this.worker.onmessageerror = (e) => {
+      console.error("message error", e);
+    };
+  }
+
+  handleWorkerMessage(e) {
+    const payload = e.data;
+    const messageType = payload?.cmd;
+    console.log("index got message", messageType);
+
+    switch (messageType) {
+      case "process_complete":
+        const { arr, height, width, pointer, byteLen } = payload.body;
+        const typedArr = new Uint8ClampedArray(arr, pointer, byteLen);
+        const newImageData = new ImageData(typedArr, width, height);
+        this.applyImg(newImageData);
+
+        this.processing = false;
+        if (this.needsProcessing) {
+          this.process();
+        }
+        break;
+
+      case "wasm_loaded":
         this.ready = true;
-      })
-      .catch((e) => {
-        console.error(e);
-      });
+        break;
+
+      default:
+        console.log("index unknown message type - ", messageType);
+    }
   }
 
   process() {
     if (!this.ready) {
-      console.log("wasm loading");
+      console.log("wasm not loaded try again soon");
       return;
     }
-    console.time("process");
+    if (this.processing) {
+      console.log("cant process while already processing");
+      this.needsProcessing = true;
+      return;
+    }
+    this.processing = true;
 
-    console.time("prewasm");
-    const imageData = this.context.getImageData(
+    const min = parseInt(this.minThreshInputEl.value);
+    const max = parseInt(this.maxThreshInputEl.value);
+    this.worker.postMessage({
+      cmd: "process",
+      body: {
+        min,
+        max,
+      },
+    });
+  }
+
+  applyImg(imageData) {
+    this.context.putImageData(
+      imageData,
       0,
       0,
-      this.canvasEl.width,
-      this.canvasEl.height,
     );
-    console.log(imageData);
-    const arr = imageData.data;
-    const byteLen = arr.byteLength;
-    console.timeEnd("prewasm");
-
-    console.time("alloc");
-    const pointer =
-      this.handler.mod.instance.exports.alloc_input_image(byteLen);
-    console.timeEnd("alloc");
-
-    console.time("arr");
-    new Uint8ClampedArray(this.handler.memory.buffer).set(arr, pointer);
-    console.time("arrEnd");
-
-    console.time("wasm");
-    const res = this.handler.mod.instance.exports.process_img(
-      pointer,
-      byteLen,
-      imageData.height,
-      imageData.width,
-    );
-    console.timeEnd("wasm");
-
-    console.log("wasm res", res);
-    console.time("putImg");
-    const resBuf = new Uint8ClampedArray(
-      this.handler.memory.buffer,
-      pointer,
-      byteLen,
-    );
-    const newImageData = new ImageData(
-      resBuf,
-      imageData.width,
-      imageData.height,
-    );
-    this.context.clearRect(0, 0, this.canvasEl.width, this.canvasEl.height);
-    this.context.putImageData(newImageData, 0, 0);
-    console.timeEnd("putImg");
-
-    console.time("dealloc");
-    this.handler.mod.instance.exports.deallocate_input_image(pointer, byteLen);
-    console.timeEnd("dealloc");
-
-    console.timeEnd("process");
   }
 
   onFileChange = () => {
@@ -118,46 +142,30 @@ class App {
         console.log("image found", "W", img.width, "H", img.height);
         this.context.drawImage(img, 0, 0);
 
-        this.process();
+        const imageData = this.context.getImageData(
+          0,
+          0,
+          img.width,
+          img.height,
+        );
+
+        this.worker.postMessage(
+          {
+            cmd: "load_image",
+            body: {
+              buf: imageData.data.buffer,
+              width: img.width,
+              height: img.height,
+            },
+          },
+          [imageData.data.buffer],
+        );
       };
+
       img.src = event.target.result;
     };
     reader.readAsDataURL(file);
   };
-}
-
-class WasmHandler {
-  constructor() {
-    this.memory = null;
-    this.mod = null;
-    this.ctx = null;
-  }
-
-  log_wasm(s, len) {
-    const buf = new Uint8Array(this.memory.buffer, s, len);
-    if (len == 0) {
-      return;
-    }
-    console.log(new TextDecoder("utf8").decode(buf));
-  }
-}
-
-async function instantiateWasmModule(wasm_handler) {
-  const wasmEnv = {
-    env: {
-      logWasm: wasm_handler.log_wasm.bind(wasm_handler),
-    },
-  };
-
-  const mod = await WebAssembly.instantiateStreaming(
-    fetch("pixelsorter.wasm"),
-    wasmEnv,
-  );
-
-  wasm_handler.memory = mod.instance.exports.memory;
-  wasm_handler.mod = mod;
-
-  return mod;
 }
 
 function init() {

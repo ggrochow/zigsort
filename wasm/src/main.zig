@@ -3,17 +3,6 @@ const allocator = std.heap.wasm_allocator;
 
 pub extern fn logWasm(s: [*]const u8, len: usize) void;
 
-// global data struct
-const GlobalData = struct {
-    // options?
-};
-
-var globalData: GlobalData = .{};
-// module needs things before anything can happen
-// need to alloc the image
-// need to init with image len/height info
-// need to init with any option
-
 export fn alloc_input_image(size: usize) [*]u8 {
     const slice = allocator.alloc(u8, size) catch @panic("failed alloc_input_image");
 
@@ -24,21 +13,24 @@ export fn deallocate_input_image(ptr: [*]u8, size: usize) void {
     allocator.free(ptr[0..size]);
 }
 
+// fn load_img
+// allocs
+// setup pixelData for the image
+
+// fn unload_image
+// de-allocs old image
+
 const PixelData = struct {
     sortValue: u8,
     r: u8,
     g: u8,
     b: u8,
-    idx: usize,
 };
 const PixelGroup = struct { pixels: []PixelData, start_idx: usize };
 
-const brightness_min: u8 = 30;
-const brightmess_max: u8 = 70;
-
 // ptr is pointing a slice of u8s of len size
 // 4 u8s represent 1 pixel, being R G B A in that order.
-export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32) u32 {
+export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32, brightness_min: u8, brightness_max: u8) u32 {
     // first we must find the groups of pixels we will to sort in this row.
     // we will then sort the groupings by the brightness value of the pixel
     // and update the image data directly after the grouping is complete
@@ -71,7 +63,6 @@ export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32) 
                 .r = r,
                 .g = g,
                 .b = b,
-                .idx = row_idx, // this seems bad
             };
 
             rowPixels.append(pixelData) catch @panic("rowdata append failed");
@@ -82,7 +73,7 @@ export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32) 
         var interval_start: usize = 0;
         var in_interval: bool = false;
         for (rowPixels.items, 0..) |item, i| {
-            if (item.sortValue < brightness_min or item.sortValue > brightmess_max) {
+            if (item.sortValue < brightness_min or item.sortValue > brightness_max) {
                 if (!in_interval) {
                     in_interval = true;
                     interval_start = i;
@@ -94,7 +85,7 @@ export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32) 
                     in_interval = false;
                     const grouping: PixelGroup = .{
                         .pixels = rowPixels.items[interval_start..i],
-                        .start_idx = interval_start, // offset into row not pixelData
+                        .start_idx = interval_start,
                     };
 
                     rowGrouping.append(grouping) catch @panic("rowGrouping append failed");
@@ -104,12 +95,11 @@ export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32) 
 
         // go through each grouping, sorting the slice by sortValue.
         for (rowGrouping.items) |grouping| {
-            // print("pixel idx {}, grouping idx {}", .{ grouping.pixels[0].idx, grouping.start_idx });
-
             std.mem.sort(PixelData, grouping.pixels, {}, sortPixelData);
             // go through sorted slice and apply the stuff
-            // print("grouping len {}", .{grouping.pixels.len});
             for (grouping.pixels, 0..) |pixel, i| {
+                // row is RGBA values, index is from pixelData not row
+                // we must multiply by 4 to get the actual row index
                 const group_row_idx = (grouping.start_idx + i) * 4;
 
                 row[group_row_idx] = pixel.r;
