@@ -40,7 +40,7 @@ jobs:
           zig build -Doptimize=ReleaseFast --build-file ./wasm/build.zig
       - name: Move .wasm
         run: |
-          mv ./wasm/zig_out/pixelsorter.wasm ./www/
+          mv ./wasm/zig_out/bin/pixelsorter.wasm ./www/
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
