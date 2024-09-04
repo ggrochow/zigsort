@@ -1,20 +1,17 @@
-// TODO: move slow wasm blocking fns to webworker somehow
-// this is in progress GL
 class App {
   // html elements
   fileInputEl;
   canvasEl;
   minThreshInputEl;
   maxThreshInputEl;
+  // wasmHandler
+  handler;
   // canvas context
   context;
-  // worker + wasm loaded
+  // wasm loaded
   ready = false;
-  // is currently in processing
-  processing = false;
-  // if we tried to que a process while currently processing
-  // use to send another call to process when complete so we dont multi-q
-  needsProcessing = false;
+  // stashed original uploaded image data
+  originalImageData;
 
   constructor() {
     this.canvasEl = document.getElementById("canvas");
@@ -56,41 +53,15 @@ class App {
       this.process();
     };
 
-    this.worker = new Worker("./worker.js");
-    this.worker.onmessage = this.handleWorkerMessage.bind(this);
-    this.worker.onerror = (e) => {
-      console.error("worker error", e);
-    };
-    this.worker.onmessageerror = (e) => {
-      console.error("message error", e);
-    };
-  }
-
-  handleWorkerMessage(e) {
-    const payload = e.data;
-    const messageType = payload?.cmd;
-    console.log("index got message", messageType);
-
-    switch (messageType) {
-      case "process_complete":
-        const { arr, height, width, pointer, byteLen } = payload.body;
-        const typedArr = new Uint8ClampedArray(arr, pointer, byteLen);
-        const newImageData = new ImageData(typedArr, width, height);
-        this.applyImg(newImageData);
-
-        this.processing = false;
-        if (this.needsProcessing) {
-          this.process();
-        }
-        break;
-
-      case "wasm_loaded":
+    const handler = new WasmHandler();
+    instantiateWasmModule(handler)
+      .then(() => {
+        this.handler = handler;
         this.ready = true;
-        break;
-
-      default:
-        console.log("index unknown message type - ", messageType);
-    }
+      })
+      .catch((e) => {
+        console.error(e);
+      });
   }
 
   process() {
@@ -98,30 +69,51 @@ class App {
       console.log("wasm not loaded try again soon");
       return;
     }
-    if (this.processing) {
-      console.log("cant process while already processing");
-      this.needsProcessing = true;
+    if (!this.originalImageData) {
+      console.error("No image data to process");
       return;
     }
-    this.processing = true;
 
     const min = parseInt(this.minThreshInputEl.value);
     const max = parseInt(this.maxThreshInputEl.value);
-    this.worker.postMessage({
-      cmd: "process",
-      body: {
-        min,
-        max,
-      },
-    });
+
+    console.log("MINMAX", min, max);
+
+    const imageData = this.originalImageData;
+    const arr = imageData.data;
+    const byteLen = arr.byteLength;
+    const pointer =
+      this.handler.mod.instance.exports.alloc_input_image(byteLen);
+    new Uint8ClampedArray(this.handler.memory.buffer).set(arr, pointer);
+      
+    const res = this.handler.mod.instance.exports.process_img(
+      pointer,
+      byteLen,
+      imageData.height,
+      imageData.width,
+      min,
+      max,
+    );
+    console.log("gotres", res);
+
+    const resBuf = new Uint8ClampedArray(
+      this.handler.memory.buffer,
+      pointer,
+      byteLen,
+    );
+    const newImageData = new ImageData(
+      resBuf,
+      imageData.width,
+      imageData.height,
+    );
+    this.applyImg(newImageData);
+
+    this.handler.mod.instance.exports.deallocate_input_image(pointer, byteLen);
   }
 
   applyImg(imageData) {
-    this.context.putImageData(
-      imageData,
-      0,
-      0,
-    );
+    this.context.clearRect(0, 0, this.canvasEl.width, this.canvasEl.height);
+    this.context.putImageData(imageData, 0, 0);
   }
 
   onFileChange = () => {
@@ -139,33 +131,47 @@ class App {
       img.onload = () => {
         this.canvasEl.width = img.width;
         this.canvasEl.height = img.height;
-        console.log("image found", "W", img.width, "H", img.height);
         this.context.drawImage(img, 0, 0);
-
-        const imageData = this.context.getImageData(
-          0,
-          0,
-          img.width,
-          img.height,
-        );
-
-        this.worker.postMessage(
-          {
-            cmd: "load_image",
-            body: {
-              buf: imageData.data.buffer,
-              width: img.width,
-              height: img.height,
-            },
-          },
-          [imageData.data.buffer],
-        );
+        this.originalImageData = this.context.getImageData(0, 0, img.width, img.height);
       };
 
       img.src = event.target.result;
     };
     reader.readAsDataURL(file);
   };
+}
+
+async function instantiateWasmModule(wasm_handler) {
+  const wasmEnv = {
+    env: {
+      log_wasm: wasm_handler.log_wasm.bind(wasm_handler),
+    },
+  };
+
+  const mod = await WebAssembly.instantiateStreaming(
+    fetch("pixelsorter.wasm"),
+    wasmEnv,
+  );
+
+  wasm_handler.memory = mod.instance.exports.memory;
+  wasm_handler.mod = mod;
+
+  return mod;
+}
+
+class WasmHandler {
+  constructor() {
+    this.memory = null;
+    this.mod = null;
+  }
+
+  log_wasm(s, len) {
+    const buf = new Uint8Array(this.memory.buffer, s, len);
+    if (len == 0) {
+      return;
+    }
+    console.log(new TextDecoder("utf8").decode(buf));
+  }
 }
 
 function init() {

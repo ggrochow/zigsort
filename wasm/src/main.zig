@@ -1,7 +1,7 @@
 const std = @import("std");
 const allocator = std.heap.wasm_allocator;
 
-pub extern fn logWasm(s: [*]const u8, len: usize) void;
+pub extern fn log_wasm(s: [*]const u8, len: usize) void;
 
 export fn alloc_input_image(size: usize) [*]u8 {
     const slice = allocator.alloc(u8, size) catch @panic("failed alloc_input_image");
@@ -12,13 +12,6 @@ export fn alloc_input_image(size: usize) [*]u8 {
 export fn deallocate_input_image(ptr: [*]u8, size: usize) void {
     allocator.free(ptr[0..size]);
 }
-
-// fn load_img
-// allocs
-// setup pixelData for the image
-
-// fn unload_image
-// de-allocs old image
 
 const PixelData = struct {
     sortValue: u8,
@@ -31,9 +24,6 @@ const PixelGroup = struct { pixels: []PixelData, start_idx: usize };
 // ptr is pointing a slice of u8s of len size
 // 4 u8s represent 1 pixel, being R G B A in that order.
 export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32, brightness_min: u8, brightness_max: u8) u32 {
-    // first we must find the groups of pixels we will to sort in this row.
-    // we will then sort the groupings by the brightness value of the pixel
-    // and update the image data directly after the grouping is complete
     const img = ptr[0..size];
 
     // holds our pixelData as we work on a row
@@ -44,6 +34,10 @@ export fn process_img(ptr: [*]u8, size: usize, img_height: u32, img_width: u32, 
     // holds groupings of pixel data for a given row
     var rowGrouping = std.ArrayList(PixelGroup).init(allocator);
     defer rowGrouping.deinit();
+
+    // first we must find the groups of pixels we will to sort in this row.
+    // we will then sort the groupings by the brightness value of the pixel
+    // and update the image data directly after the grouping is complete
 
     // start working through each row
     var y: usize = 0;
@@ -152,8 +146,8 @@ fn sRGBToLinear(color: f64) f64 {
 fn print(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
     const slice = std.fmt.bufPrint(&buf, fmt, args) catch {
-        logWasm(&buf, buf.len);
+        log_wasm(&buf, buf.len);
         return;
     };
-    logWasm(slice.ptr, slice.len);
+    log_wasm(slice.ptr, slice.len);
 }
